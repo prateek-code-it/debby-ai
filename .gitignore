@@ -1,0 +1,18 @@
+# Database — changes constantly, not really "code"
+*.db
+*.db-journal
+
+# Python cache
+__pycache__/
+*.pyc
+
+# The virtual environment itself — huge, regenerable, never track it
+../debby_ai/bin/
+../debby_ai/lib/
+../debby_ai/pyvenv.cfg
+
+# Logs — regenerated every run, no need to version them
+logs/*.log
+
+# Anything DEBBY! builds for itself at runtime, if it gets noisy
+tools/__generated__/
