@@ -1,0 +1,7 @@
+{
+  "chromium": "chromium",
+  "terminal": "alacritty",
+  "file_manager": "thunar",
+  "text_editor": "nvim",
+  "system_monitor": "btop"
+}
