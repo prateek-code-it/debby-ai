@@ -1,10 +1,188 @@
 """
 DEBBY! -- core/brain.py
+Phase 5: internet requests now check the knowledge table FIRST -- if
+DEBBY! already learned about this topic, it answers offline, no
+gatekeeper needed. Only genuinely new topics trigger the Y/N prompt,
+and anything learned gets saved for next time.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+try:
+    import ollama
+except ImportError:
+    print("ERROR: 'ollama' python package not found.")
+    print("Fix: activate your venv first -> source ~/debby_ai/bin/activate")
+    sys.exit(1)
+
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(WORKSPACE_ROOT))
+
+from memory.memory_helper import (  # noqa: E402
+    save_message, get_recent_messages, register_tool,
+    save_knowledge, search_knowledge,
+)
+from core.router import classify  # noqa: E402
+from core.coder import build_tool  # noqa: E402
+from core.search import search_web, slugify_topic  # noqa: E402
+
+CURRENT_USER = "you"
+
+
+def load_config():
+    config_path = WORKSPACE_ROOT / "config" / "config.json"
+    if not config_path.exists():
+        print(f"ERROR: config file not found at {config_path}")
+        sys.exit(1)
+    with open(config_path, "r") as f:
+        return json.load(f)
+
+
+def check_ollama_running(model_name):
+    try:
+        models = ollama.list()
+        available = [m["model"] for m in models.get("models", [])]
+        if not any(model_name in m for m in available):
+            print(f"ERROR: model '{model_name}' not found in Ollama.")
+            print(f"Available models: {available}")
+            print(f"Fix: ollama pull {model_name}")
+            sys.exit(1)
+    except Exception as e:
+        print("ERROR: could not reach Ollama. Is it running?")
+        print(f"Details: {e}")
+        sys.exit(1)
+
+
+def handle_code_request(user_input: str) -> str:
+    print("[Router: code request -> handing off to Coder model...]")
+    result = build_tool(user_input)
+    if not result["success"]:
+        return f"I tried to build that but hit an error: {result['error']}"
+
+    register_tool(result["name"], result["description"], result["filepath"])
+    return (
+        f"Built it and saved it to tools/{result['name']}.py\n\n"
+        f"```python\n{result['code']}\n```"
+    )
+
+
+def handle_internet_request(user_input: str, brain_model: str) -> str:
+    topic = slugify_topic(user_input)
+
+    # Check what's already known BEFORE asking permission to search.
+    # This is the actual "offline once learned" behavior.
+    cached = search_knowledge(topic, user_id=CURRENT_USER)
+    if cached:
+        print(f"[Found existing knowledge on '{topic}' -- answering offline, no search needed.]")
+        facts = "\n".join(f"- {c['fact']}" for c in cached[:3])
+        return f"From what I already know about this:\n{facts}"
+
+    print(f"[Router: this needs internet access. No stored knowledge found for '{topic}'.]")
+    answer = input("  DEBBY! wants to search the internet for this. Allow? (Y/N): ").strip().lower()
+    if answer != "y":
+        return "Okay, I won't search. I'll do my best with what I already know, but I may be out of date on this."
+
+    print("[Searching...]")
+    results = search_web(user_input, max_results=3)
+    if not results:
+        return "I tried to search but didn't get any usable results. My apologies."
+
+    # Synthesize the raw search snippets into a clean answer using the brain model.
+    snippet_text = "\n\n".join(f"{r['title']}: {r['snippet']} (source: {r['url']})" for r in results)
+    synth_prompt = (
+        f"Based on these search results, answer the question concisely in 2-4 sentences:\n\n"
+        f"Question: {user_input}\n\nSearch results:\n{snippet_text}"
+    )
+    try:
+        synth = ollama.chat(model=brain_model, messages=[{"role": "user", "content": synth_prompt}])
+        summary = synth["message"]["content"].strip()
+    except Exception as e:
+        return f"Found search results but couldn't summarize them: {e}"
+
+    sources = ", ".join(r["url"] for r in results)
+    save_knowledge(topic, summary, source=sources, user_id=CURRENT_USER)
+    print(f"[Saved to knowledge base under topic '{topic}' for future offline use.]")
+
+    return summary
+
+
+def main():
+    config = load_config()
+    model = config["brain_model"]
+    system_prompt = config["system_prompt"]
+    max_turns = config.get("max_context_turns", 10)
+
+    check_ollama_running(model)
+
+    history = get_recent_messages(CURRENT_USER, limit=max_turns)
+    conversation = [{"role": "system", "content": system_prompt}] + history
+
+    print(f"=== DEBBY! Brain (Phase 5) -- model: {model} -- user: {CURRENT_USER} ===")
+    if history:
+        print(f"(Loaded {len(history)} messages from memory.)")
+    print("Type 'exit' or 'quit' to stop.\n")
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nShutting down.")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit"):
+            print("Shutting down.")
+            break
+
+        conversation.append({"role": "user", "content": user_input})
+        save_message(CURRENT_USER, "user", user_input)
+
+        category = classify(user_input, router_model=config["router_model"])
+
+        if category == "code":
+            reply = handle_code_request(user_input)
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(CURRENT_USER, "assistant", reply)
+            continue
+
+        if category == "internet":
+            reply = handle_internet_request(user_input, model)
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(CURRENT_USER, "assistant", reply)
+            continue
+
+        trimmed = [conversation[0]] + conversation[-(max_turns * 2):]
+
+        try:
+            response = ollama.chat(model=model, messages=trimmed)
+            reply = response["message"]["content"]
+        except Exception as e:
+            print(f"[ERROR talking to model: {e}]")
+            continue
+
+        print(f"DEBBY!: {reply}\n")
+        conversation.append({"role": "assistant", "content": reply})
+        save_message(CURRENT_USER, "assistant", reply)
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+"""
+$""
+DEBBY! -- core/brain.py
 Phase 4: every message now goes through the router first. Chat stays
 with the Brain model, code requests hand off to the Coder model and
 get saved into the tools sandbox, and internet-requiring requests hit
 a Y/N gatekeeper (actual search comes in Phase 5).
-"""
+""$
 
 import json
 import sys
@@ -137,7 +315,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-
+"""
 """
 DEBBY! — core/brain.py
 Phase 3: wired to the SQLite memory database. Conversations now persist
