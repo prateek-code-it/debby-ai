@@ -1,46 +1,76 @@
 """
 DEBBY! -- core/router.py
-Phase 4: fast classification of each user message using the small,
-cheap router model (deepseek-r1:1.5b). Decides: plain chat, a coding
-request, or something that needs internet access.
-
-This keeps the expensive 7B brain model from wasting cycles on
-classification -- the 1.5B model is fast enough to run on every single
-message without adding noticeable delay.
+Merged version: one router-model call now does BOTH classification
+AND preference extraction, instead of two separate calls. Cuts one
+full model invocation off every single message.
 """
 
+import json
 import ollama
 
 VALID_CATEGORIES = {"chat", "code", "internet"}
 
-CLASSIFY_PROMPT = """You are a request classifier. Read the user's message and
-respond with EXACTLY ONE WORD, nothing else, no punctuation, no explanation:
+COMBINED_PROMPT = """Analyze this message and respond with ONLY a JSON object,
+nothing else, no explanation, no markdown fences:
 
-- "code" if they want a script, program, automation, or file/OS-level task built
-- "internet" if answering requires current/live information you would need to search for
-- "chat" for everything else (conversation, questions you can answer from general knowledge)
+{{
+  "category": "chat" or "code" or "internet",
+  "preference_category": null or a short category like "music_genre"/"diet"/"color",
+  "preference_value": null or the preference value
+}}
 
-User message: "{message}"
+category rules:
+- "code": user wants a script, program, or automation built
+- "internet": answering needs current/live info you'd have to search for
+- "chat": everything else
 
-Answer with one word only:"""
+preference rules: only fill preference_category/preference_value if the
+message states a lasting personal preference/taste/restriction (e.g.
+"I love jazz", "I'm vegetarian") -- NOT for questions or one-off requests.
+Otherwise both stay null.
+
+Message: "{message}"
+"""
 
 
-def classify(message: str, router_model: str = "deepseek-r1:1.5b") -> str:
+def classify_and_extract(message: str, router_model: str = "deepseek-r1:1.5b") -> dict:
+    """
+    Returns: {"category": str, "preference": (cat, val) tuple or None}
+    """
+    default = {"category": "chat", "preference": None}
     try:
         response = ollama.chat(
             model=router_model,
-            messages=[{"role": "user", "content": CLASSIFY_PROMPT.format(message=message)}],
+            messages=[{"role": "user", "content": COMBINED_PROMPT.format(message=message)}],
+            options={"num_predict": 150},  # hard cap -- this task never needs more
         )
-        raw = response["message"]["content"].strip().lower()
+        raw = response["message"]["content"].strip()
 
         if "</think>" in raw:
             raw = raw.split("</think>")[-1].strip()
 
-        for category in VALID_CATEGORIES:
-            if category in raw:
-                return category
+        # small models sometimes wrap JSON in markdown fences anyway -- strip if present
+        if raw.startswith("```"):
+            raw = raw.strip("`").replace("json", "", 1).strip()
 
-        return "chat"
+        data = json.loads(raw)
+        category = data.get("category", "chat")
+        if category not in VALID_CATEGORIES:
+            category = "chat"
+
+        pref = None
+        if data.get("preference_category") and data.get("preference_value"):
+            pref = (
+                str(data["preference_category"]).lower().replace(" ", "_"),
+                str(data["preference_value"]).lower(),
+            )
+
+        return {"category": category, "preference": pref}
     except Exception as e:
         print(f"[Router error, defaulting to chat: {e}]")
-        return "chat"
+        return default
+
+
+# Kept for backwards compatibility with anything still calling the old API
+def classify(message: str, router_model: str = "deepseek-r1:1.5b") -> str:
+    return classify_and_extract(message, router_model)["category"]

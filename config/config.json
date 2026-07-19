@@ -1,7 +1,8 @@
 {
   "brain_model": "qwen2.5:7b",
   "coder_model": "qwen2.5-coder:7b",
-  "router_model": "deepseek-r1:1.5b",
+  "router_model": "qwen2.5:1.5b",
+  "deep_model": "deepseek-r1:1.5b",
   "ollama_host": "http://localhost:11434",
   "max_context_turns": 10,
   "system_prompt": "You are DEBBY!, a helpful local AI assistant running entirely offline on the user's own machine. Be concise, direct, and warm. You do not have internet access unless explicitly told a search was performed and given the results."
