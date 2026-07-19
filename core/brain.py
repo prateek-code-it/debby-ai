@@ -33,6 +33,7 @@ from core.search import search_web, slugify_topic  # noqa: E402
 from core.logger import log_event  # noqa: E402
 from core.preferences import format_preferences_for_prompt  # noqa: E402
 from core.deep import deep_think  # noqa: E402
+from core.voice import listen_and_transcribe  # noqa: E402
 
 
 def load_config():
@@ -170,7 +171,8 @@ def main():
     if prefs:
         print(f"(Recalled {len(prefs)} known preferences about you.)")
     print("Type 'exit' or 'quit' to stop.")
-    print("Type '/deep <question>' for slower, deeper reasoning on hard questions.\n")
+    print("Type '/deep <question>' for slower, deeper reasoning on hard questions.")
+    print("Type '/voice' (or '/voice 8' for 8 seconds) to speak instead of type.\n")
 
     while True:
         try:
@@ -184,6 +186,24 @@ def main():
         if user_input.lower() in ("exit", "quit"):
             print("Shutting down.")
             break
+
+        # /voice records from the mic and transcribes offline, then the
+        # transcribed text flows into the SAME pipeline as typed input
+        # (router, /deep, memory, etc.) -- no special-casing downstream.
+        if user_input.lower().startswith("/voice"):
+            parts = user_input.split()
+            duration = config.get("voice_duration", 5)
+            if len(parts) > 1 and parts[1].isdigit():
+                duration = int(parts[1])
+
+            print(f"[Listening for {duration} seconds... speak now]")
+            result = listen_and_transcribe(duration=duration, model_size=config["voice_model"])
+            if not result["success"]:
+                print(f"[Voice error: {result['error']}]\n")
+                continue
+
+            user_input = result["text"]
+            print(f"You (voice): {user_input}")
 
         conversation.append({"role": "user", "content": user_input})
         save_message(user_id, "user", user_input)
