@@ -29,9 +29,27 @@ def _extract_code(response_text: str) -> str:
     return response_text.strip()
 
 
-def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
-    return slug[:40] or "tool"
+STOPWORDS = {
+    "hey", "hi", "hello", "please", "can", "you", "now", "create",
+    "build", "make", "write", "program", "python", "file", "tool",
+    "code", "script", "for", "me", "that", "which", "has", "have",
+    "will", "would", "like", "want", "need", "save", "it", "in",
+    "into", "the", "a", "an", "and", "or", "on", "to", "of",
+    "directory", "folder", "tools", "using", "with", "this", "is",
+}
+
+
+def _slugify(text: str, max_words: int = 5) -> str:
+    """
+    Extracts a short, meaningful name from a request instead of
+    naively truncating the raw sentence -- "hey create an python
+    program which has a calculator" becomes "calculator", not
+    "hey_create_an_python_program_which_ha".
+    """
+    words = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    keywords = [w for w in words if w not in STOPWORDS]
+    slug = "_".join(keywords[:max_words]) or "tool"
+    return slug[:40]
 
 
 def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b",
@@ -86,4 +104,4 @@ def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b",
         "filepath": str(filepath),
         "code": code,
         "description": request,
-    } 
+    }
