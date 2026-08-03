@@ -36,6 +36,8 @@ from core.deep import deep_think  # noqa: E402
 from core.voice import listen_and_transcribe, speak  # noqa: E402
 from core.airllm_bridge import ask_airllm  # noqa: E402
 from core.os_bridge import match_app_request, launch_app, list_authorized_apps  # noqa: E402
+from core.files import read_file_content  # noqa: E402
+import shlex  # noqa: E402
 
 
 def load_config():
@@ -60,6 +62,37 @@ def check_ollama_running(model_name):
         print("ERROR: could not reach Ollama. Is it running?")
         print(f"Details: {e}")
         sys.exit(1)
+
+
+def handle_file_request(raw_args: str, brain_model: str) -> str:
+    """
+    raw_args is everything after '/file '. Path first (quote it if it
+    has spaces), then an optional question. Defaults to a summary
+    if no question is given.
+    """
+    try:
+        parts = shlex.split(raw_args)
+    except ValueError as e:
+        return f"Couldn't parse that -- if your path has spaces, wrap it in quotes. ({e})"
+
+    if not parts:
+        return "Usage: /file <path> [question]  -- e.g. /file ~/notes.txt what does this say about the budget?"
+
+    filepath = parts[0]
+    question = " ".join(parts[1:]).strip() or "Summarize this file."
+
+    result = read_file_content(filepath)
+    if not result["success"]:
+        return result["error"]
+
+    note = " (file was long, only the first portion was used)" if result["truncated"] else ""
+    prompt = f"Here is the content of a file:\n\n{result['content']}\n\n{question}{note}"
+
+    try:
+        response = ollama.chat(model=brain_model, messages=[{"role": "user", "content": prompt}])
+        return response["message"]["content"]
+    except Exception as e:
+        return f"Read the file fine, but couldn't get an answer from the model: {e}"
 
 
 def handle_app_request(user_input: str, router_model: str) -> str:
@@ -194,6 +227,7 @@ def main():
     print("Type 'exit' or 'quit' to stop.")
     print("Type '/deep <question>' for slower, deeper reasoning on hard questions.")
     print("Type '/voice' (or '/voice 8' for 8 seconds) to speak instead of type.")
+    print("Type '/file <path> [question]' to ask about a text file or PDF.")
     if config.get("airllm_enabled", False):
         print("Type '/airllm <question>' to use the AirLLM model.\n")
     else:
@@ -235,6 +269,18 @@ def main():
         conversation.append({"role": "user", "content": user_input})
         save_message(user_id, "user", user_input)
         log_event("chat", user_input, role="user")
+
+        # /file bypasses the router entirely -- explicit user override.
+        if user_input.lower().startswith("/file "):
+            raw_args = user_input[len("/file "):].strip()
+            reply = handle_file_request(raw_args, model)
+            print(f"DEBBY!: {reply}\n")
+            if used_voice:
+                speak(reply)
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("file", reply, role="assistant")
+            continue
 
         # /airllm bypasses the router entirely -- explicit user override.
         # Disabled by default (see config.json) -- gives a clear message
