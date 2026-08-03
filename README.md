@@ -72,17 +72,50 @@ loads/unloads on demand:
 | `/airllm <question>` | Disabled by default — see config.json |
 | `exit` / `quit` | Stop the session |
 
-## Setup
+## Compatibility
 
-See `setup_debby.sh` for full environment setup (Debian packages,
-Ollama, Python venv). Broad strokes:
+**Supported: Debian and Debian-derivatives only** (Debian, Ubuntu, etc).
+`install.sh` uses `apt` directly and will refuse to run with a clear
+error message on anything else (Arch, Fedora, etc) rather than fail
+halfway through with confusing errors. Multi-distro support isn't
+built — this is a deliberate scope decision, not an oversight.
+
+**Minimum hardware**: 4 CPU cores, 8GB RAM (16GB comfortable), no GPU
+required (everything runs CPU-only via Ollama). ~30GB free disk space
+for the OS + all four models + Python dependencies.
+
+**Tested on**: Debian 13 (Trixie), minimal/no-GUI install.
+
+## Setup — the short version
+
+If you're starting from a truly minimal system (just Debian + git):
 
 ```bash
-bash setup_debby.sh
+python3 -m venv ~/debby_ai
+cd ~/debby_ai
+git clone <your-repo-url> workspace
+cd workspace
+bash install.sh
+```
+
+`install.sh` does everything in one pass: checks your OS is actually
+Debian-based, sets up a swapfile, installs all system packages (i3,
+X11, xrdp, audio libs, etc), installs Ollama and pulls all four
+models, creates the Python venv dependencies, initializes the
+database, and configures X11 autostart. Takes a while (mostly Ollama
+model downloads) — let it run to completion.
+
+**First-time sudo note**: if you're logged in as `root` when you run
+it, it'll set up sudo access for your user and ask you to reboot and
+re-run the script — that's expected, not a bug, just how the very
+first bootstrap step has to work.
+
+Once it finishes:
+```bash
 source ~/debby_ai/bin/activate
-python3 memory/init_memory.py       # first time only
-python core/admin.py                # create your first user account
-python core/brain.py                # start chatting
+cd ~/debby_ai/workspace
+python core/admin.py     # create your first user account (admin-only, one-time)
+python core/brain.py     # start chatting
 ```
 
 Run the GUI separately, in its own terminal:
