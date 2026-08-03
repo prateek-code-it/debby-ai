@@ -29,7 +29,7 @@ from memory.memory_helper import (  # noqa: E402
     list_tools, delete_tool,
 )
 from core.router import classify_and_extract  # noqa: E402
-from core.coder import build_tool  # noqa: E402
+from core.coder import build_tool, match_existing_tool  # noqa: E402
 from core.search import search_web, slugify_topic  # noqa: E402
 from core.logger import log_event  # noqa: E402
 from core.preferences import format_preferences_for_prompt  # noqa: E402
@@ -204,7 +204,17 @@ def handle_shell_request(command: str) -> str:
     return f"Output:\n```\n{output}\n```"
 
 
-def handle_code_request(user_input: str) -> str:
+def handle_code_request(user_input: str, router_model: str) -> str:
+    existing = list_tools()
+    match = match_existing_tool(user_input, existing, router_model=router_model)
+    if match:
+        matched_tool = next(t for t in existing if t["name"] == match)
+        print(f"[Found an existing tool that might do this: {match} -- {matched_tool['description']}]")
+        answer = input("  Use the existing one instead of building a new one? (Y/N): ").strip().lower()
+        if answer == "y":
+            return handle_run_command_request(match)
+        print("[Building a new one instead...]")
+
     print("[Router: code request -> handing off to Coder model...]")
     log_event("code", f"Building tool for: {user_input}", role="system")
     result = build_tool(user_input)
@@ -470,7 +480,7 @@ def main():
             continue
 
         if category == "code":
-            reply = handle_code_request(user_input)
+            reply = handle_code_request(user_input, config["router_model"])
             print(f"DEBBY!: {reply}\n")
             if used_voice:
                 speak("I've built that and saved it to your tools folder.")

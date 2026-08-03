@@ -105,3 +105,40 @@ def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b",
         "code": code,
         "description": request,
     }
+
+
+def match_existing_tool(request: str, existing_tools: list, router_model: str = "qwen2.5:1.5b"):
+    """
+    Checks if a new request is similar enough to something already
+    built that it should be reused instead of duplicated. Returns the
+    matching tool's name, or None if nothing is a close enough match.
+    """
+    if not existing_tools:
+        return None
+
+    listing = "\n".join(f"- {t['name']}: {t['description']}" for t in existing_tools)
+    prompt = f"""Here are tools already built:
+{listing}
+
+New request: "{request}"
+
+Does this request match one of the existing tools closely enough to
+reuse it, rather than building a near-duplicate? Respond with ONLY the
+exact tool name if yes, or "none" if it's different enough to warrant
+building something new. No explanation, just the answer."""
+
+    try:
+        response = ollama.chat(
+            model=router_model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"num_predict": 30},
+        )
+        raw = response["message"]["content"].strip().lower()
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1].strip()
+        for tool in existing_tools:
+            if tool["name"].lower() in raw:
+                return tool["name"]
+        return None
+    except Exception:
+        return None 
