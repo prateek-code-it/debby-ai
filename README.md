@@ -93,7 +93,7 @@ If you're starting from a truly minimal system (just Debian + git):
 ```bash
 python3 -m venv ~/debby_ai
 cd ~/debby_ai
-git clone <your-repo-url> workspace
+git clone git@github.com:prateek-code-it/debby-ai.git workspace
 cd workspace
 bash install.sh
 ```
