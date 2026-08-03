@@ -74,11 +74,25 @@ loads/unloads on demand:
 
 ## Compatibility
 
-**Supported: Debian and Debian-derivatives only** (Debian, Ubuntu, etc).
-`install.sh` uses `apt` directly and will refuse to run with a clear
-error message on anything else (Arch, Fedora, etc) rather than fail
-halfway through with confusing errors. Multi-distro support isn't
-built — this is a deliberate scope decision, not an oversight.
+**Supported: Debian-based (Debian, Ubuntu) and Arch-based (Arch,
+Manjaro) systems.** `install.sh` detects which family you're on and
+branches the package-manager commands accordingly. Anything else
+(Fedora, openSUSE, etc.) gets a clear error message instead of
+failing halfway through with confusing output.
+
+**Debian support is the primary, most-tested path** — it's what this
+whole project was built and run on throughout development. **Arch
+support was added afterward** and is less battle-tested. A few things
+to know if you're on Arch:
+- Arch is rolling-release, so package names/versions can drift over
+  time in ways Debian's stable releases don't — if a `pacman` command
+  fails, check whether a package got renamed upstream.
+- The sudo bootstrap step edits `/etc/sudoers` directly to enable the
+  `wheel` group (Debian's `sudo` group setup is simpler and doesn't
+  need this). The script backs up `/etc/sudoers` first
+  (`/etc/sudoers.debby_backup`), but this is inherently a more
+  sensitive step than the Debian equivalent — worth double-checking
+  sudo works correctly after the reboot.
 
 **Minimum hardware**: 4 CPU cores, 8GB RAM (16GB comfortable), no GPU
 required (everything runs CPU-only via Ollama). ~30GB free disk space
