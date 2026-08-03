@@ -16,3 +16,5 @@ logs/*.log
 
 # Anything DEBBY! builds for itself at runtime, if it gets noisy
 tools/__generated__/
+
+!tools/.gitkeep
