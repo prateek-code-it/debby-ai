@@ -26,6 +26,7 @@ from memory.memory_helper import (  # noqa: E402
     save_knowledge, search_knowledge,
     save_preference, get_preferences,
     verify_login, list_users,
+    list_tools, delete_tool,
 )
 from core.router import classify_and_extract  # noqa: E402
 from core.coder import build_tool  # noqa: E402
@@ -37,6 +38,8 @@ from core.voice import listen_and_transcribe, speak  # noqa: E402
 from core.airllm_bridge import ask_airllm  # noqa: E402
 from core.os_bridge import match_app_request, launch_app, list_authorized_apps  # noqa: E402
 from core.files import read_file_content  # noqa: E402
+from core.file_ops import delete_file, list_sandbox_files, read_file as read_tool_file  # noqa: E402
+from core.executor import run_command, suggest_run_command  # noqa: E402
 import shlex  # noqa: E402
 
 
@@ -122,6 +125,85 @@ def handle_deep_request(question: str, deep_model: str) -> str:
     return result["answer"]
 
 
+def handle_tools_list() -> str:
+    tools = list_tools()
+    if not tools:
+        return "No tools built yet."
+    lines = [f"- {t['name']}: {t['description']}" for t in tools]
+    return "Saved tools:\n" + "\n".join(lines)
+
+
+def handle_run_command_request(toolname: str) -> str:
+    tools = list_tools()
+    match = next((t for t in tools if t["name"] == toolname), None)
+    if not match:
+        return f"No tool named '{toolname}'. Try /tools to see what's available."
+
+    run_cmd = suggest_run_command(match["filepath"])
+    print(f"About to run: {run_cmd}")
+    answer = input("  Confirm? (Y/N): ").strip().lower()
+    if answer != "y":
+        return "Cancelled."
+
+    result = run_command(run_cmd)
+    if not result["success"]:
+        return f"Couldn't run it: {result['error']}"
+    output = result["stdout"] or "(no output)"
+    if result["stderr"]:
+        output += f"\n\n[stderr]\n{result['stderr']}"
+    return f"Output:\n```\n{output}\n```"
+
+
+def handle_edit_request(raw_args: str, coder_model: str) -> str:
+    parts = raw_args.split(maxsplit=1)
+    if len(parts) < 2:
+        return "Usage: /edit <toolname> <what to change>"
+    toolname, change_request = parts[0], parts[1]
+
+    filename = f"{toolname}.py" if not toolname.endswith(".py") else toolname
+    existing = read_tool_file(filename)
+    if not existing["success"]:
+        return existing["error"]
+
+    result = build_tool(
+        change_request, coder_model=coder_model,
+        edit_filename=filename, existing_code=existing["content"],
+    )
+    if not result["success"]:
+        return f"Edit failed: {result['error']}"
+
+    return f"Updated tools/{filename}\n\n```python\n{result['code']}\n```"
+
+
+def handle_delete_request(toolname: str) -> str:
+    filename = f"{toolname}.py" if not toolname.endswith(".py") else toolname
+    print(f"About to delete: tools/{filename}")
+    answer = input("  Confirm? (Y/N): ").strip().lower()
+    if answer != "y":
+        return "Cancelled."
+
+    result = delete_file(filename)
+    if not result["success"]:
+        return result["error"]
+    delete_tool(toolname.replace(".py", ""))
+    return f"Deleted tools/{filename}."
+
+
+def handle_shell_request(command: str) -> str:
+    print(f"About to run in tools/: {command}")
+    answer = input("  This runs a raw terminal command. Confirm? (Y/N): ").strip().lower()
+    if answer != "y":
+        return "Cancelled."
+
+    result = run_command(command)
+    if not result["success"]:
+        return f"Error: {result['error']}"
+    output = result["stdout"] or "(no output)"
+    if result["stderr"]:
+        output += f"\n\n[stderr]\n{result['stderr']}"
+    return f"Output:\n```\n{output}\n```"
+
+
 def handle_code_request(user_input: str) -> str:
     print("[Router: code request -> handing off to Coder model...]")
     log_event("code", f"Building tool for: {user_input}", role="system")
@@ -130,10 +212,25 @@ def handle_code_request(user_input: str) -> str:
         return f"I tried to build that but hit an error: {result['error']}"
 
     register_tool(result["name"], result["description"], result["filepath"])
-    return (
+    reply = (
         f"Built it and saved it to tools/{result['name']}.py\n\n"
         f"```python\n{result['code']}\n```"
     )
+
+    run_cmd = suggest_run_command(result["filepath"])
+    answer = input(f"  Want me to run it now? ({run_cmd}) (Y/N): ").strip().lower()
+    if answer == "y":
+        print(f"[Running: {run_cmd}]")
+        run_result = run_command(run_cmd)
+        if run_result["success"]:
+            output = run_result["stdout"] or "(no output)"
+            if run_result["stderr"]:
+                output += f"\n\n[stderr]\n{run_result['stderr']}"
+            reply += f"\n\nOutput:\n```\n{output}\n```"
+        else:
+            reply += f"\n\nCouldn't run it: {run_result['error']}"
+
+    return reply
 
 
 def handle_internet_request(user_input: str, brain_model: str, user_id: str) -> str:
@@ -228,6 +325,9 @@ def main():
     print("Type '/deep <question>' for slower, deeper reasoning on hard questions.")
     print("Type '/voice' (or '/voice 8' for 8 seconds) to speak instead of type.")
     print("Type '/file <path> [question]' to ask about a text file or PDF.")
+    print("Type '/tools' to list built scripts, '/run <name>' to execute one.")
+    print("Type '/edit <name> <change>' or '/delete <name>' to modify/remove a tool.")
+    print("Type '/shell <command>' for raw terminal control (always asks to confirm).")
     if config.get("airllm_enabled", False):
         print("Type '/airllm <question>' to use the AirLLM model.\n")
     else:
@@ -269,6 +369,48 @@ def main():
         conversation.append({"role": "user", "content": user_input})
         save_message(user_id, "user", user_input)
         log_event("chat", user_input, role="user")
+
+        # New file-management + terminal-control commands. All
+        # destructive/execution actions (run, delete, shell) require
+        # explicit Y/N confirmation inside their handler functions.
+        if user_input.lower() == "/tools":
+            reply = handle_tools_list()
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            continue
+
+        if user_input.lower().startswith("/run "):
+            reply = handle_run_command_request(user_input[len("/run "):].strip())
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("run", reply, role="assistant")
+            continue
+
+        if user_input.lower().startswith("/edit "):
+            reply = handle_edit_request(user_input[len("/edit "):].strip(), config["coder_model"])
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("edit", reply, role="assistant")
+            continue
+
+        if user_input.lower().startswith("/delete "):
+            reply = handle_delete_request(user_input[len("/delete "):].strip())
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("delete", reply, role="assistant")
+            continue
+
+        if user_input.lower().startswith("/shell "):
+            reply = handle_shell_request(user_input[len("/shell "):].strip())
+            print(f"DEBBY!: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("shell", reply, role="assistant")
+            continue
 
         # /file bypasses the router entirely -- explicit user override.
         if user_input.lower().startswith("/file "):

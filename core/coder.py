@@ -34,20 +34,34 @@ def _slugify(text: str) -> str:
     return slug[:40] or "tool"
 
 
-def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b") -> dict:
+def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b",
+                edit_filename: str = None, existing_code: str = None) -> dict:
     """
     Generate a script for `request`, save it to tools/, and return info
     about what was created so brain.py can report back to the user and
     register it in memory.
+
+    If edit_filename + existing_code are provided, this is an EDIT of
+    an existing tool (not a new one) -- the existing code is given as
+    context, and the result overwrites the same file instead of
+    creating a new timestamped one.
     """
     TOOLS_DIR.mkdir(exist_ok=True)
+
+    if existing_code:
+        user_message = (
+            f"Here is the existing code:\n\n```python\n{existing_code}\n```\n\n"
+            f"Modify it to: {request}\n\nReturn the FULL updated script, not just the changed part."
+        )
+    else:
+        user_message = request
 
     try:
         response = ollama.chat(
             model=coder_model,
             messages=[
                 {"role": "system", "content": CODER_SYSTEM_PROMPT},
-                {"role": "user", "content": request},
+                {"role": "user", "content": user_message},
             ],
         )
         raw = response["message"]["content"]
@@ -55,9 +69,14 @@ def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b") -> dict:
         return {"success": False, "error": str(e)}
 
     code = _extract_code(raw)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    name = f"{_slugify(request)}_{timestamp}"
-    filepath = TOOLS_DIR / f"{name}.py"
+
+    if edit_filename:
+        name = edit_filename.replace(".py", "")
+        filepath = TOOLS_DIR / edit_filename
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"{_slugify(request)}_{timestamp}"
+        filepath = TOOLS_DIR / f"{name}.py"
 
     filepath.write_text(code)
 
@@ -67,4 +86,4 @@ def build_tool(request: str, coder_model: str = "qwen2.5-coder:7b") -> dict:
         "filepath": str(filepath),
         "code": code,
         "description": request,
-    }
+    } 
