@@ -33,7 +33,9 @@ from core.search import search_web, slugify_topic  # noqa: E402
 from core.logger import log_event  # noqa: E402
 from core.preferences import format_preferences_for_prompt  # noqa: E402
 from core.deep import deep_think  # noqa: E402
-from core.voice import listen_and_transcribe  # noqa: E402
+from core.voice import listen_and_transcribe, speak  # noqa: E402
+from core.airllm_bridge import ask_airllm  # noqa: E402
+from core.os_bridge import match_app_request, launch_app, list_authorized_apps  # noqa: E402
 
 
 def load_config():
@@ -58,6 +60,25 @@ def check_ollama_running(model_name):
         print("ERROR: could not reach Ollama. Is it running?")
         print(f"Details: {e}")
         sys.exit(1)
+
+
+def handle_app_request(user_input: str, router_model: str) -> str:
+    app_key = match_app_request(user_input, router_model=router_model)
+    if not app_key:
+        available = ", ".join(list_authorized_apps())
+        return f"I'm not sure which app you meant. I can open: {available}"
+
+    result = launch_app(app_key)
+    if result["success"]:
+        return f"Opening {app_key}."
+    return f"Couldn't open {app_key}: {result['error']}"
+
+
+def handle_airllm_request(question: str, config: dict) -> str:
+    result = ask_airllm(question, config)
+    if not result["success"]:
+        return result["error"]
+    return result["answer"]
 
 
 def handle_deep_request(question: str, deep_model: str) -> str:
@@ -172,7 +193,11 @@ def main():
         print(f"(Recalled {len(prefs)} known preferences about you.)")
     print("Type 'exit' or 'quit' to stop.")
     print("Type '/deep <question>' for slower, deeper reasoning on hard questions.")
-    print("Type '/voice' (or '/voice 8' for 8 seconds) to speak instead of type.\n")
+    print("Type '/voice' (or '/voice 8' for 8 seconds) to speak instead of type.")
+    if config.get("airllm_enabled", False):
+        print("Type '/airllm <question>' to use the AirLLM model.\n")
+    else:
+        print("(/airllm is available but disabled -- see config.json to enable it later)\n")
 
     while True:
         try:
@@ -190,6 +215,7 @@ def main():
         # /voice records from the mic and transcribes offline, then the
         # transcribed text flows into the SAME pipeline as typed input
         # (router, /deep, memory, etc.) -- no special-casing downstream.
+        used_voice = False
         if user_input.lower().startswith("/voice"):
             parts = user_input.split()
             duration = config.get("voice_duration", 5)
@@ -203,11 +229,24 @@ def main():
                 continue
 
             user_input = result["text"]
+            used_voice = True
             print(f"You (voice): {user_input}")
 
         conversation.append({"role": "user", "content": user_input})
         save_message(user_id, "user", user_input)
         log_event("chat", user_input, role="user")
+
+        # /airllm bypasses the router entirely -- explicit user override.
+        # Disabled by default (see config.json) -- gives a clear message
+        # explaining why, rather than silently failing, when off.
+        if user_input.lower().startswith("/airllm "):
+            question = user_input[len("/airllm "):].strip()
+            reply = handle_airllm_request(question, config)
+            print(f"DEBBY! [AIRLLM]: {reply}\n")
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("airllm", reply, role="assistant")
+            continue
 
         # /deep command bypasses the router entirely -- explicit user
         # override, not something the classifier should ever decide.
@@ -215,6 +254,8 @@ def main():
             question = user_input[len("/deep "):].strip()
             reply = handle_deep_request(question, config["deep_model"])
             print(f"DEBBY! [DEEP]: {reply}\n")
+            if used_voice:
+                speak(reply)
             conversation.append({"role": "assistant", "content": reply})
             save_message(user_id, "assistant", reply)
             log_event("deep", reply, role="assistant")
@@ -229,9 +270,22 @@ def main():
             save_preference(user_id, pref_category, pref_value)
             print(f"[Noted preference: {pref_category} = {pref_value}]")
 
+        if category == "app":
+            print("[Router: app request -> checking authorized apps...]")
+            reply = handle_app_request(user_input, config["router_model"])
+            print(f"DEBBY!: {reply}\n")
+            if used_voice:
+                speak(reply)
+            conversation.append({"role": "assistant", "content": reply})
+            save_message(user_id, "assistant", reply)
+            log_event("app", reply, role="assistant")
+            continue
+
         if category == "code":
             reply = handle_code_request(user_input)
             print(f"DEBBY!: {reply}\n")
+            if used_voice:
+                speak("I've built that and saved it to your tools folder.")
             conversation.append({"role": "assistant", "content": reply})
             save_message(user_id, "assistant", reply)
             log_event("code", reply, role="assistant")
@@ -240,6 +294,8 @@ def main():
         if category == "internet":
             reply = handle_internet_request(user_input, model, user_id)
             print(f"DEBBY!: {reply}\n")
+            if used_voice:
+                speak(reply)
             conversation.append({"role": "assistant", "content": reply})
             save_message(user_id, "assistant", reply)
             log_event("internet", reply, role="assistant")
@@ -255,11 +311,12 @@ def main():
             continue
 
         print(f"DEBBY!: {reply}\n")
+        if used_voice:
+            speak(reply)
         conversation.append({"role": "assistant", "content": reply})
         save_message(user_id, "assistant", reply)
         log_event("chat", reply, role="assistant")
 
 
 if __name__ == "__main__":
-    main()
- 
+    main() 

@@ -8,19 +8,20 @@ full model invocation off every single message.
 import json
 import ollama
 
-VALID_CATEGORIES = {"chat", "code", "internet"}
+VALID_CATEGORIES = {"chat", "code", "internet", "app"}
 
 COMBINED_PROMPT = """Analyze this message and respond with ONLY a JSON object,
 nothing else, no explanation, no markdown fences:
 
 {{
-  "category": "chat" or "code" or "internet",
+  "category": "chat" or "code" or "internet" or "app",
   "preference_category": null or a short category like "music_genre"/"diet"/"color",
   "preference_value": null or the preference value
 }}
 
 category rules:
-- "code": user wants a script, program, or automation built
+- "code": user wants a script, program, or automation BUILT (not opened)
+- "app": user wants an EXISTING application opened/launched (e.g. "open chromium", "launch a terminal")
 - "internet": answering needs current/live info you'd have to search for
 - "chat": everything else
 
@@ -73,4 +74,4 @@ def classify_and_extract(message: str, router_model: str = "deepseek-r1:1.5b") -
 
 # Kept for backwards compatibility with anything still calling the old API
 def classify(message: str, router_model: str = "deepseek-r1:1.5b") -> str:
-    return classify_and_extract(message, router_model)["category"]
+    return classify_and_extract(message, router_model)["category"] 

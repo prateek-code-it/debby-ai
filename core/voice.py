@@ -85,3 +85,33 @@ def listen_and_transcribe(duration: int = 5, model_size: str = "tiny.en") -> dic
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+# ---------------------------------------------------------------
+# Voice OUTPUT (text-to-speech), offline via espeak-ng / pyttsx3
+# ---------------------------------------------------------------
+
+_tts_engine = None
+
+
+def _get_tts_engine():
+    global _tts_engine
+    if _tts_engine is None:
+        import pyttsx3
+        _tts_engine = pyttsx3.init()
+        _tts_engine.setProperty("rate", 175)  # words per minute, slightly slower than default for clarity
+    return _tts_engine
+
+
+def speak(text: str):
+    """
+    Reads text aloud offline. Fails silently (prints a warning, doesn't
+    crash the chat loop) if TTS isn't set up -- voice output should
+    never break the core text conversation.
+    """
+    try:
+        engine = _get_tts_engine()
+        engine.say(text)
+        engine.runAndWait()
+    except Exception as e:
+        print(f"[Voice output unavailable: {e}]") 

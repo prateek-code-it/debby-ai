@@ -26,6 +26,46 @@ def _load_allowlist() -> dict:
         return json.load(f)
 
 
+def match_app_request(user_input: str, router_model: str = "qwen2.5:1.5b") -> str:
+    """
+    Given a natural-language request like "open a browser" or "launch
+    the terminal", figures out which authorized app (if any) matches.
+    Returns the app key, or None if nothing matches -- deliberately
+    returns None rather than guessing, since launch_app() already
+    refuses anything not on the allowlist anyway; this is just about
+    picking the right key from what the user actually meant.
+    """
+    import ollama
+
+    apps = list(_load_allowlist().keys())
+    if not apps:
+        return None
+
+    prompt = f"""The user said: "{user_input}"
+
+Which of these authorized apps did they mean? {apps}
+
+Respond with ONLY the exact app name from the list, or "none" if none match.
+No explanation, just the word."""
+
+    try:
+        response = ollama.chat(
+            model=router_model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"num_predict": 20},
+        )
+        raw = response["message"]["content"].strip().lower().strip('"').strip("'")
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1].strip()
+        for app in apps:
+            if app.lower() in raw:
+                return app
+        return None
+    except Exception as e:
+        print(f"[App matching error: {e}]")
+        return None
+
+
 def list_authorized_apps() -> list:
     return list(_load_allowlist().keys())
 
@@ -75,4 +115,4 @@ if __name__ == "__main__":
     test_app = input("Enter an app name to test-launch (or blank to skip): ").strip()
     if test_app:
         result = launch_app(test_app)
-        print(result)
+        print(result) 

@@ -5,6 +5,8 @@
   "deep_model": "deepseek-r1:1.5b",
   "voice_model": "tiny.en",
   "voice_duration": 5,
+  "airllm_enabled": false,
+  "airllm_model": "garage-bAInd/Platypus2-70B-instruct",
   "ollama_host": "http://localhost:11434",
   "max_context_turns": 10,
   "system_prompt": "You are DEBBY!, a helpful local AI assistant running entirely offline on the user's own machine. Be concise, direct, and warm. You do not have internet access unless explicitly told a search was performed and given the results."
