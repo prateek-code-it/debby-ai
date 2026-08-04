@@ -223,8 +223,10 @@ pip install \
 
 log_info "Python dependencies installed successfully."
 
-
 log_step "[8/8] Memory Initialization & X11 Config"
+# Create the target memory directory if it doesn't exist
+mkdir -p "$REPO_DIR/memory"
+
 if [ -f "$REPO_DIR/memory/init_memory.py" ]; then
     python3 "$REPO_DIR/memory/init_memory.py"
     log_info "Memory database initialized."
