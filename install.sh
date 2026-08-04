@@ -226,55 +226,36 @@ log_info "Python dependencies installed successfully."
 
 log_step "[8/8] Memory Initialization, User Setup & X11 Config"
 
-# 1. Initialize SQLite Database
+# Step A: Always ensure database schema is initialized FIRST
 if [ -f "$REPO_DIR/memory/init_memory.py" ]; then
-    python3 "$REPO_DIR/memory/init_memory.py"
-    log_info "Memory database initialized."
+    "$VENV_DIR/bin/python3" "$REPO_DIR/memory/init_memory.py"
+    log_info "Memory database schema initialized."
 fi
 
-# 2. Check if users already exist
+# Step B: Check for existing users safely
 EXISTING_USERS=""
 if [ -f "$REPO_DIR/memory/debby.db" ]; then
-    EXISTING_USERS=$(python3 -c "
+    EXISTING_USERS=$("$VENV_DIR/bin/python3" -c "
 import sqlite3
 try:
     conn = sqlite3.connect('$REPO_DIR/memory/debby.db')
     cur = conn.cursor()
-    # Check table existence first
-    cur.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND (name='users' OR name='user_profiles');\")
-    table = cur.fetchone()
-    if table:
-        table_name = table[0]
-        cur.execute(f'SELECT user_id FROM {table_name}')
-        users = [str(row[0]) for row in cur.fetchall()]
-        print(', '.join(users))
+    cur.execute('SELECT display_name FROM users;')
+    users = [str(row[0]) for row in cur.fetchall()]
+    print(', '.join(users))
     conn.close()
 except Exception:
     print('')
 " 2>/dev/null || true)
 fi
 
-# Fallback check if user data is stored in config or JSON instead of SQLite
-if [ -z "$EXISTING_USERS" ] && [ -f "$REPO_DIR/config.json" ]; then
-    EXISTING_USERS=$(python3 -c "
-import json
-try:
-    with open('$REPO_DIR/config.json') as f:
-        data = json.load(f)
-        if 'users' in data:
-            print(', '.join(data['users'].keys()))
-except Exception:
-    print('')
-" 2>/dev/null || true)
-fi
-
-# 3. Prompt for user creation ONLY if no users exist
+# Step C: Prompt to create the first admin user ONLY if table is empty
 if [ -n "$EXISTING_USERS" ]; then
     log_skip "Existing user(s) detected: ${BOLD}$EXISTING_USERS${NC}"
 else
     if [ -f "$REPO_DIR/core/admin.py" ]; then
         echo -e "\n${BOLD}${CYAN}--- Creating First Admin User Account ---${NC}"
-        python3 "$REPO_DIR/core/admin.py" || true
+        "$VENV_DIR/bin/python3" "$REPO_DIR/core/admin.py" || true
     fi
 fi
 
