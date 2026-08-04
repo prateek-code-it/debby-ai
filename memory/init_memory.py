@@ -1,10 +1,14 @@
-
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path.home() / "debby_ai" / "workspace" / "memory" / "debby.db"
+# Dynamically find the folder where this script lives, regardless of repo location
+SCRIPT_DIR = Path(__file__).resolve().parent
+DB_PATH = SCRIPT_DIR / "debby.db"
 
 def init():
+    # Ensure parent directories exist before connecting
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -57,5 +61,4 @@ def init():
     print(f"Memory database initialized at {DB_PATH}")
 
 if __name__ == "__main__":
-    init()
-
+    init() 
