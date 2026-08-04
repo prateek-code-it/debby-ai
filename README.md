@@ -137,6 +137,16 @@ Run the GUI separately, in its own terminal:
 python gui/dashboard.py
 ```
 
+## 🗑️ Uninstallation
+
+DEBBY! comes with a modular `uninstall.sh` script that allows you to selectively remove components using an interactive menu.
+
+To run the uninstaller:
+
+```bash
+bash uninstall.sh
+```
+
 ## Known limitations (by design, not bugs)
 
 - CPU-only inference — no GPU, so response speed is a real, actively
