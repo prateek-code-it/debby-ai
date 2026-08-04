@@ -19,10 +19,10 @@ def init_db():
         )
     ''')
     
-    # Check for missing pin_hash in existing database files
+    # Migration check for users
     cur.execute("PRAGMA table_info(users);")
-    existing_columns = [column[1] for column in cur.fetchall()]
-    if "pin_hash" not in existing_columns:
+    user_cols = [col[1] for col in cur.fetchall()]
+    if "pin_hash" not in user_cols:
         cur.execute("ALTER TABLE users ADD COLUMN pin_hash TEXT DEFAULT '';")
 
     # 2. Preferences Table
@@ -38,7 +38,7 @@ def init_db():
         )
     ''')
 
-    # 3. Memories / Short-term & Long-term Storage
+    # 3. Memories Table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,21 +50,29 @@ def init_db():
         )
     ''')
 
-    # 4. Conversation History Table
+    # 4. Conversations Table (uses 'content' column)
     cur.execute('''
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             role TEXT NOT NULL,
-            message TEXT NOT NULL,
+            content TEXT NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+
+    # Migration check for conversations: ensure 'content' exists
+    cur.execute("PRAGMA table_info(conversations);")
+    conv_cols = [col[1] for col in cur.fetchall()]
+    if "content" not in conv_cols and "message" in conv_cols:
+        cur.execute("ALTER TABLE conversations RENAME COLUMN message TO content;")
+    elif "content" not in conv_cols:
+        cur.execute("ALTER TABLE conversations ADD COLUMN content TEXT DEFAULT '';")
 
     conn.commit()
     conn.close()
 
 if __name__ == "__main__":
     init_db()
-    print("Database initialization complete (all tables created).")
+    print("Database schema synchronized and initialized.") 
