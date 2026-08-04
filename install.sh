@@ -223,15 +223,62 @@ pip install \
 
 log_info "Python dependencies installed successfully."
 
-log_step "[8/8] Memory Initialization & X11 Config"
-# Create the target memory directory if it doesn't exist
-mkdir -p "$REPO_DIR/memory"
 
+log_step "[8/8] Memory Initialization, User Setup & X11 Config"
+
+# 1. Initialize SQLite Database
 if [ -f "$REPO_DIR/memory/init_memory.py" ]; then
     python3 "$REPO_DIR/memory/init_memory.py"
     log_info "Memory database initialized."
 fi
 
+# 2. Check if users already exist
+EXISTING_USERS=""
+if [ -f "$REPO_DIR/memory/debby.db" ]; then
+    EXISTING_USERS=$(python3 -c "
+import sqlite3
+try:
+    conn = sqlite3.connect('$REPO_DIR/memory/debby.db')
+    cur = conn.cursor()
+    # Check table existence first
+    cur.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND (name='users' OR name='user_profiles');\")
+    table = cur.fetchone()
+    if table:
+        table_name = table[0]
+        cur.execute(f'SELECT user_id FROM {table_name}')
+        users = [str(row[0]) for row in cur.fetchall()]
+        print(', '.join(users))
+    conn.close()
+except Exception:
+    print('')
+" 2>/dev/null || true)
+fi
+
+# Fallback check if user data is stored in config or JSON instead of SQLite
+if [ -z "$EXISTING_USERS" ] && [ -f "$REPO_DIR/config.json" ]; then
+    EXISTING_USERS=$(python3 -c "
+import json
+try:
+    with open('$REPO_DIR/config.json') as f:
+        data = json.load(f)
+        if 'users' in data:
+            print(', '.join(data['users'].keys()))
+except Exception:
+    print('')
+" 2>/dev/null || true)
+fi
+
+# 3. Prompt for user creation ONLY if no users exist
+if [ -n "$EXISTING_USERS" ]; then
+    log_skip "Existing user(s) detected: ${BOLD}$EXISTING_USERS${NC}"
+else
+    if [ -f "$REPO_DIR/core/admin.py" ]; then
+        echo -e "\n${BOLD}${CYAN}--- Creating First Admin User Account ---${NC}"
+        python3 "$REPO_DIR/core/admin.py" || true
+    fi
+fi
+
+# 4. Configure ~/.bash_profile and ~/.xinitrc
 if ! grep -q "exec startx" ~/.bash_profile 2>/dev/null; then
     cat >> ~/.bash_profile << 'EOF'
 
@@ -258,11 +305,18 @@ log_info "Configured ~/.xinitrc"
 deactivate
 
 echo -e "\n${BOLD}${GREEN}============================================================${NC}"
-echo -e "${BOLD}${GREEN}  DEBBY! installed successfully on $PRETTY_NAME.${NC}"
+echo -e "${BOLD}${GREEN}  DEBBY! check/installation completed on $PRETTY_NAME.${NC}"
 echo -e "${BOLD}${GREEN}============================================================${NC}\n"
-echo -e " ${BOLD}Next steps:${NC}"
-echo -e "   source $VENV_DIR/bin/activate"
-echo -e "   cd $REPO_DIR"
-echo -e "   python core/admin.py     ${CYAN}<- create your first user account${NC}"
-echo -e "   python core/brain.py     ${CYAN}<- start chatting${NC}"
-echo -e "============================================================\n" 
+echo -e " ${BOLD}User Accounts:${NC}"
+if [ -n "$EXISTING_USERS" ]; then
+    echo -e "   • Registered User(s): ${GREEN}${BOLD}$EXISTING_USERS${NC}"
+else
+    echo -e "   • Registered User(s): ${YELLOW}No users found (Run admin.py to create one)${NC}"
+fi
+echo -e "   • Add more users anytime: ${CYAN}python core/admin.py${NC}"
+echo -e ""
+echo -e " ${BOLD}To launch DEBBY!:${NC}"
+echo -e "   1. ${CYAN}source $VENV_DIR/bin/activate${NC}"
+echo -e "   2. ${CYAN}cd $REPO_DIR${NC}"
+echo -e "   3. ${CYAN}python core/brain.py${NC}"
+echo -e "============================================================\n"
