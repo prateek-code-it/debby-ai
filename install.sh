@@ -116,7 +116,16 @@ sudo ufw allow 3389/tcp
 sudo ufw --force enable
 
 echo "=== [6/8] Ollama + models ==="
-curl -fsSL https://ollama.com/install.sh | sh
+echo  "Checking if ollama is installed..."
+if command -v ollama >/dev/null 2>&1;then
+	echo "ollama is already installed !"
+	echo "Moving to install models..."
+else
+	echo "Ollama is not installed installing Ollama"
+	curl -fsSL https://ollama.com/install.sh | sh
+	echo "installed successfully ...."
+	echo "installing models"
+fi
 ollama pull qwen2.5:7b
 ollama pull qwen2.5-coder:7b
 ollama pull qwen2.5:1.5b
